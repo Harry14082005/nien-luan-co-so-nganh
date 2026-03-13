@@ -1,4 +1,4 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.model;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -41,14 +41,26 @@ import java.time.LocalDateTime;
  * ================================================================
  */
 @Entity
-@Table(name = "fraud_cases", indexes = {
-        // Index để dashboard query nhanh theo status
-        @Index(name = "idx_fraud_cases_status",         columnList = "status"),
-        // Index để tìm case theo transaction
-        @Index(name = "idx_fraud_cases_transaction_id", columnList = "transaction_id"),
-        // Index để lọc theo thời gian tạo (dashboard dùng nhiều)
-        @Index(name = "idx_fraud_cases_created_at",     columnList = "created_at")
-})
+@Table(name = "fraud_cases",
+        indexes = {
+                // Index để dashboard query nhanh theo status
+                @Index(name = "idx_fraud_cases_status",         columnList = "status"),
+                // Index để tìm case theo transaction
+                @Index(name = "idx_fraud_cases_transaction_id", columnList = "transaction_id"),
+                // Index để lọc theo thời gian tạo (dashboard dùng nhiều)
+                @Index(name = "idx_fraud_cases_created_at",     columnList = "created_at")
+        },
+        uniqueConstraints = {
+                // ✅ FIX RACE CONDITION: DB tự chặn duplicate ở tầng thấp nhất.
+                // Dù Flink và Spring Consumer cùng pass check existsByTransactionId()
+                // đồng thời, DB chỉ cho phép 1 trong 2 INSERT thành công.
+                // Cái còn lại sẽ ném DataIntegrityViolationException → bắt trong Service.
+                @UniqueConstraint(
+                        name       = "uq_fraud_cases_transaction_id",
+                        columnNames = "transaction_id"
+                )
+        }
+)
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

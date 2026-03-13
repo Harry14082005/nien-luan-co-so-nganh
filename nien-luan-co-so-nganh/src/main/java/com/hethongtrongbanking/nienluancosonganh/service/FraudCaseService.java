@@ -1,5 +1,9 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.service;
 
+import com.hethongtrongbanking.nienluancosonganh.model.FraudCase;
+import com.hethongtrongbanking.nienluancosonganh.repository.FraudCaseRepository;
+import com.hethongtrongbanking.nienluancosonganh.model.FraudCaseStatus;
+import com.hethongtrongbanking.nienluancosonganh.model.TransactionStatus;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -42,9 +46,9 @@ public class FraudCaseService {
      * @return FraudCase vừa tạo, hoặc case cũ nếu đã tồn tại
      */
     @Transactional
-    public FraudCase createCase(Long transactionId, double riskScore, 
-                                 String fraudType, String detectionLayer, 
-                                 String fraudPatterns, String reason) {
+    public FraudCase createCase(Long transactionId, double riskScore,
+                                String fraudType, String detectionLayer,
+                                String fraudPatterns, String reason) {
         // Kiểm tra tránh tạo trùng case cho cùng 1 giao dịch
         if (fraudCaseRepository.existsByTransactionId(transactionId)) {
             log.warn("⚠️  Case đã tồn tại cho transaction ID={}, bỏ qua", transactionId);
@@ -187,14 +191,51 @@ public class FraudCaseService {
     /**
      * getDashboardStats(): thống kê tổng hợp cho dashboard.
      * Trả về Map gồm: tổng case, số OPEN, số RESOLVED_FRAUD, số RESOLVED_LEGITIMATE, số IGNORED
+     *
+     * ✅ FIX: Từ 5 query riêng lẻ → 1 query GROUP BY duy nhất.
+     *
+     * Vấn đề cũ:
+     *   fraudCaseRepository.count()              → query 1
+     *   fraudCaseRepository.countByStatus(OPEN)  → query 2
+     *   ...                                      → query 3, 4, 5
+     *   Tổng: 5 round-trips đến DB mỗi lần dashboard load.
+     *   Khi hệ thống có traffic cao, dashboard load liên tục → DB bị quá tải.
+     *
+     * Giải pháp:
+     *   countGroupByStatus() dùng JPQL: SELECT f.status, COUNT(f) GROUP BY f.status
+     *   → 1 round-trip duy nhất, DB xử lý nội bộ → nhanh hơn đáng kể.
+     *   Tính "total" bằng cách cộng tất cả count → không cần query riêng.
      */
     public Map<String, Long> getDashboardStats() {
+        // 1 query GROUP BY → trả về List<Object[]> dạng [status, count]
+        List<Object[]> rows = fraudCaseRepository.countGroupByStatus();
+
+        // Khởi tạo map với giá trị mặc định = 0
+        // Đảm bảo tất cả key luôn tồn tại kể cả khi không có case nào ở status đó
         Map<String, Long> stats = new HashMap<>();
-        stats.put("total",               fraudCaseRepository.count());
-        stats.put("open",                fraudCaseRepository.countByStatus(FraudCaseStatus.OPEN));
-        stats.put("resolvedFraud",       fraudCaseRepository.countByStatus(FraudCaseStatus.RESOLVED_FRAUD));
-        stats.put("resolvedLegitimate",  fraudCaseRepository.countByStatus(FraudCaseStatus.RESOLVED_LEGITIMATE));
-        stats.put("ignored",             fraudCaseRepository.countByStatus(FraudCaseStatus.IGNORED));
+        stats.put("open",               0L);
+        stats.put("resolvedFraud",      0L);
+        stats.put("resolvedLegitimate", 0L);
+        stats.put("ignored",            0L);
+
+        long total = 0L;
+        for (Object[] row : rows) {
+            FraudCaseStatus status = (FraudCaseStatus) row[0];
+            long count             = (Long) row[1];
+            total += count;
+
+            // Map từng status → key tương ứng trong response
+            switch (status) {
+                case OPEN                -> stats.put("open",               count);
+                case RESOLVED_FRAUD      -> stats.put("resolvedFraud",      count);
+                case RESOLVED_LEGITIMATE -> stats.put("resolvedLegitimate", count);
+                case IGNORED             -> stats.put("ignored",            count);
+            }
+        }
+
+        // Tổng = tổng tất cả count, không cần query riêng
+        stats.put("total", total);
+
         return stats;
     }
 

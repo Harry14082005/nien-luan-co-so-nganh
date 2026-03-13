@@ -1,5 +1,6 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.repository;
 
+import com.hethongtrongbanking.nienluancosonganh.model.Payment;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

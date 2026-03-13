@@ -1,6 +1,9 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.hethongtrongbanking.nienluancosonganh.model.Payment;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -54,7 +57,9 @@ public class IdempotencyService {
     @Autowired
     private StringRedisTemplate redisTemplate;
 
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper = new ObjectMapper()
+            .registerModule(new JavaTimeModule())                    // ✅ FIX: hỗ trợ LocalDateTime Java 8+
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS); // lưu dạng ISO string, không phải số
 
     // ================================================================
     // SINH KEY

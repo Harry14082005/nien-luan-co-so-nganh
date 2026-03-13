@@ -1,5 +1,6 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.kafka;
 
+import com.hethongtrongbanking.nienluancosonganh.model.Payment;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +34,21 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
 
+    // ✅ FIX: Đọc group-id từ application.properties thay vì hardcode.
+    //
+    // Vấn đề cũ — group-id xuất hiện ở 2 chỗ độc lập:
+    //   1. KafkaConsumerConfig  : config.put(GROUP_ID_CONFIG, "fraud-detection-group")
+    //   2. FraudTransactionConsumer: @KafkaListener(groupId = "fraud-detection-group")
+    //   → Đổi ở 1 chỗ mà quên chỗ kia → 2 group-id khác nhau
+    //   → Kafka tưởng có 2 consumer group riêng → offset lệch, message xử lý 2 lần.
+    //
+    // Giải pháp: 1 nguồn sự thật duy nhất trong application.properties:
+    //   spring.kafka.consumer.group-id=fraud-detection-group
+    //
+    // Cả Config lẫn @KafkaListener đều đọc từ đây → luôn đồng bộ, không bao giờ lệch.
+    @Value("${spring.kafka.consumer.group-id}")
+    private String consumerGroupId;
+
     /**
      * consumerFactory(): định nghĩa cách tạo Kafka consumer.
      *
@@ -48,7 +64,7 @@ public class KafkaConsumerConfig {
 
         Map<String, Object> config = new HashMap<>();
         config.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        config.put(ConsumerConfig.GROUP_ID_CONFIG, "fraud-detection-group");
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, consumerGroupId); // ✅ từ properties, không hardcode
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);

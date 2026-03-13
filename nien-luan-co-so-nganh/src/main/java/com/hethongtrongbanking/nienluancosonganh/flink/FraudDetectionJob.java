@@ -1,7 +1,8 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.flink;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import com.hethongtrongbanking.nienluancosonganh.model.PaymentTransaction;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.state.ListState;
@@ -53,10 +54,10 @@ public class FraudDetectionJob {
     // ════════════════════════════════════════════════════════════
     // TẦNG 1: 3 RULE CỨng - BẮT NGAY (BLOCKED)
     // ════════════════════════════════════════════════════════════
-    private static final int    VELOCITY_THRESHOLD    = 1;      // > 1 GD/phút = HIGH_VELOCITY
+    private static final int    VELOCITY_THRESHOLD    = 10;     // ✅ FIX: tăng 1→10, tránh false positive (> 10 GD/phút = HIGH_VELOCITY)
     private static final double LARGE_AMOUNT_THRESHOLD = 5_000.0; // >= 5000$ = HIGH_AMOUNT
     private static final long   DUPLICATE_WINDOW_MS   = 5_000L;  // Cùng tiền trong 5s = DUPLICATE
-    
+
     private static final String SPRING_BOOT_URL = "http://localhost:8080/api/v1/payments";
 
     public static void main(String[] args) throws Exception {
@@ -191,7 +192,7 @@ public class FraudDetectionJob {
          * status đã = BLOCKED → chỉ gọi AI lấy score để tạo FraudCase,
          * không update status nữa (tránh ghi đè).
          */
-        private void blockTransaction(PaymentTransaction tx, String fraudType, 
+        private void blockTransaction(PaymentTransaction tx, String fraudType,
                                       String reason, Collector<String> out) {
             updateStatusInDB(tx.getId(), "BLOCKED", fraudType, reason);
 

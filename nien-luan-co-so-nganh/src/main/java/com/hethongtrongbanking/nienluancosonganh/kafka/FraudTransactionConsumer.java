@@ -1,7 +1,12 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.kafka;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hethongtrongbanking.nienluancosonganh.model.Payment;
+import com.hethongtrongbanking.nienluancosonganh.model.TransactionStatus;
+import com.hethongtrongbanking.nienluancosonganh.repository.PaymentRepository;
+import com.hethongtrongbanking.nienluancosonganh.service.FraudCaseService;
+import com.hethongtrongbanking.nienluancosonganh.service.PaymentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -63,7 +68,7 @@ public class FraudTransactionConsumer {
 
     @KafkaListener(
             topics   = "payment_transactions",
-            groupId  = "fraud-detection-group",
+            groupId  = "${spring.kafka.consumer.group-id}",
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(Payment payment) {
@@ -94,15 +99,28 @@ public class FraudTransactionConsumer {
             if (currentStatus == TransactionStatus.BLOCKED) {
                 // Flink đã BLOCKED ở tầng 1 → KHÔNG ghi đè status
                 // Nhưng vẫn tạo FraudCase để analyst có thể xem xét
-                log.info("🔒 Tầng 1 đã BLOCKED | ID={} | AI score={} | Tạo FraudCase",
-                        payment.getId(), String.format("%.3f", result.riskScore()));
+                log.warn("\n" +
+                                "╔══════════════════════════════════════════════════╗\n" +
+                                "║  🚨 FRAUD DETECTED — TẦNG 1 (Rule-based)        ║\n" +
+                                "╠══════════════════════════════════════════════════╣\n" +
+                                "║  ID       : {}\n" +
+                                "║  Thẻ      : ****{}\n" +
+                                "║  Số tiền  : ${}\n" +
+                                "║  AI Score : {} | Level: {}\n" +
+                                "║  Patterns : {}\n" +
+                                "╚══════════════════════════════════════════════════╝",
+                        payment.getId(),
+                        payment.getCcNum().substring(payment.getCcNum().length() - 4),
+                        payment.getAmt(),
+                        String.format("%.3f", result.riskScore()), result.riskLevel(),
+                        result.patterns().isEmpty() ? "none" : result.patterns());
 
                 // Tìm fraudType từ DB (được set bởi Flink)
                 Payment paymentRecord = paymentRepository.findById(payment.getId()).orElse(null);
                 String fraudTypeLayer1 = paymentRecord != null ? paymentRecord.getFraudType() : "UNKNOWN";
-                
+
                 fraudCaseService.createCase(
-                        payment.getId(), 
+                        payment.getId(),
                         result.riskScore(),
                         fraudTypeLayer1,
                         "LAYER_1",
@@ -135,9 +153,34 @@ public class FraudTransactionConsumer {
                 case BLOCKED      -> "🚨";
                 default           -> "❓";
             };
-            log.info("{} [TẦNG 2] ID={} | Score={} | → {}",
-                    emoji, payment.getId(),
-                    String.format("%.3f", result.riskScore()), newStatus);
+            if (newStatus == TransactionStatus.APPROVED) {
+                log.info("✅ [TẦNG 2] ID={} | ****{} | ${} | Score={} | APPROVED",
+                        payment.getId(),
+                        payment.getCcNum().substring(payment.getCcNum().length() - 4),
+                        payment.getAmt(),
+                        String.format("%.3f", result.riskScore()));
+            } else {
+                log.warn("\n" +
+                                "╔══════════════════════════════════════════════════╗\n" +
+                                "║  {} [TẦNG 2] FRAUD DETECTED — AI/ML             ║\n" +
+                                "╠══════════════════════════════════════════════════╣\n" +
+                                "║  ID       : {}\n" +
+                                "║  Thẻ      : ****{}\n" +
+                                "║  Số tiền  : ${}\n" +
+                                "║  Category : {}\n" +
+                                "║  AI Score : {} | Level: {}\n" +
+                                "║  Patterns : {}\n" +
+                                "║  → Status : {}\n" +
+                                "╚══════════════════════════════════════════════════╝",
+                        emoji,
+                        payment.getId(),
+                        payment.getCcNum().substring(payment.getCcNum().length() - 4),
+                        payment.getAmt(),
+                        payment.getCategory(),
+                        String.format("%.3f", result.riskScore()), result.riskLevel(),
+                        result.patterns().isEmpty() ? "none" : result.patterns(),
+                        newStatus);
+            }
 
         } catch (Exception e) {
             log.error("❌ Lỗi xử lý GD ID={} | {}", payment.getId(), e.getMessage());
@@ -241,7 +284,7 @@ public class FraudTransactionConsumer {
                 patterns.append(p.asText());
             });
         }
-        
+
         // Xác định fraud type từ patterns của AI
         String fraudType = "UNKNOWN_PATTERN";
         if (patterns.length() > 0) {
@@ -250,7 +293,7 @@ public class FraudTransactionConsumer {
                 fraudType = patternArray[0]; // Lấy pattern đầu tiên làm fraud type
             }
         }
-        
+
         return new AiResult(riskScore, riskLevel, patterns.toString(), fraudType);
     }
 

@@ -1,5 +1,10 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.service;
 
+import com.hethongtrongbanking.nienluancosonganh.exception.ResourceNotFoundException;
+import com.hethongtrongbanking.nienluancosonganh.kafka.PaymentProducer;
+import com.hethongtrongbanking.nienluancosonganh.model.Payment;
+import com.hethongtrongbanking.nienluancosonganh.model.TransactionStatus;
+import com.hethongtrongbanking.nienluancosonganh.repository.PaymentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -82,9 +87,20 @@ public class PaymentService {
     @Transactional
     public Payment updateStatus(Long id, TransactionStatus status, String fraudType, String reason) {
         Payment payment = repository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy giao dịch ID=" + id));
+                .orElseThrow(() -> new ResourceNotFoundException("Payment", id)); // ✅ FIX: 404 thay vì 500;
 
         TransactionStatus oldStatus = payment.getStatus();
+
+        // ✅ FIX: Guard chống ghi đè BLOCKED
+        // Flink (tầng 1) BLOCK trước → Spring Consumer (tầng 2) không được ghi đè
+        // Ngoại lệ: analyst chủ động APPROVE sau khi review → cho phép đổi từ BLOCKED
+        if (oldStatus == TransactionStatus.BLOCKED && status != TransactionStatus.BLOCKED
+                && status != TransactionStatus.APPROVED) {
+            log.warn("⚠️  Bỏ qua ghi đè BLOCKED | ID={} | Tầng 2 muốn set {} nhưng Tầng 1 đã BLOCKED",
+                    id, status);
+            return payment;
+        }
+
         payment.setStatus(status);
         payment.setStatusReason(reason);
         if (fraudType != null) {
@@ -93,7 +109,7 @@ public class PaymentService {
 
         Payment updated = repository.save(payment);
         log.info("🔄 Status thay đổi | ID={} | {} → {} | Fraud Type: {} | Lý do: {}",
-                id, oldStatus, status, fraudType != null ? fraudType : "N/A", 
+                id, oldStatus, status, fraudType != null ? fraudType : "N/A",
                 reason != null ? reason : "N/A");
 
         return updated;

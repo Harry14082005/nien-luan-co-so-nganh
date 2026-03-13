@@ -1,4 +1,4 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.model;
 
 /**
  * ================================================================

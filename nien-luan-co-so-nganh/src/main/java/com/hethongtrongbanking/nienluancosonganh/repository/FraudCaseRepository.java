@@ -1,5 +1,7 @@
-package com.hethongtrongbanking.nienluancosonganh;
+package com.hethongtrongbanking.nienluancosonganh.repository;
 
+import com.hethongtrongbanking.nienluancosonganh.model.FraudCase;
+import com.hethongtrongbanking.nienluancosonganh.model.FraudCaseStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
